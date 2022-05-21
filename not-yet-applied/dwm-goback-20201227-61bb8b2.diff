@@ -1,0 +1,150 @@
+Description
+This patch adds a function named goback which allows activating the previously active tagset and binds it to MODKEY+g.
+Unlike dwm's view function (bound to MODKEY+Tab by default), goback registers when you focus another monitor.
+
+Examples
+You are on your first monitor and switch from tag 1 to tag 2.
+Then goback (MODKEY+g) brings you back to tag 1 (like MODKEY+Tab).
+Next, you focus your third monitor (which is showing tags 3 and 4), no matter if your use your mouse or a shortcut like MODKEY+comma.
+Then goback (MODKEY+g) brings the focus back to your first monitor (tag 1).
+Pressing MODKEY+g again brings you back to the third monitor (tags 3 and 4).
+
+---
+ config.h     |  2 +-
+ dwm.c        | 31 +++++++++++++++++++++++++++++--
+ 2 files changed, 30 insertions(+), 3 deletions(-)
+
+diff --git a/config.h b/config.h
+index 1c0b587..c217a27 100644
+--- a/config.h
++++ b/config.h
+@@ -72,6 +72,7 @@ static Key keys[] = {
+ 	{ MODKEY,                       XK_l,      setmfact,       {.f = +0.05} },
+ 	{ MODKEY,                       XK_Return, zoom,           {0} },
+-	{ MODKEY,                       XK_Tab,    view,           {0} },
++	{ MODKEY,                       XK_Tab,    goback,         {0} },
+ 	{ MODKEY|ShiftMask,             XK_c,      killclient,     {0} },
+ 	{ MODKEY,                       XK_t,      setlayout,      {.v = &layouts[0]} },
+ 	{ MODKEY,                       XK_f,      setlayout,      {.v = &layouts[1]} }, /* monocle */
+diff --git a/dwm.c b/dwm.c
+index 664c527..3d40bac 100644
+--- a/dwm.c
++++ b/dwm.c
+@@ -173,6 +173,7 @@ static Atom getatomprop(Client *c, Atom prop);
+ static int getrootptr(int *x, int *y);
+ static long getstate(Window w);
+ static int gettextprop(Window w, Atom atom, char *text, unsigned int size);
++static void goback(const Arg *arg);
+ static void grabbuttons(Client *c, int focused);
+ static void grabkeys(void);
+ static void incnmaster(const Arg *arg);
+@@ -266,7 +267,7 @@ static Cur *cursor[CurLast];
+ static Clr **scheme;
+ static Display *dpy;
+ static Drw *drw;
+-static Monitor *mons, *selmon;
++static Monitor *mons, *selmon, *prevmon;
+ static Window root, wmcheckwin;
+
+ /* configuration, allows nested code to access above variables */
+@@ -427,6 +428,7 @@ buttonpress(XEvent *e)
+ 	/* focus monitor if necessary */
+ 	if ((m = wintomon(ev->window)) && m != selmon) {
+ 		unfocus(selmon->sel, 1);
++		prevmon = selmon;
+ 		selmon = m;
+ 		focus(NULL);
+ 	}
+@@ -765,6 +767,7 @@ enternotify(XEvent *e)
+ 	m = c ? c->mon : wintomon(ev->window);
+ 	if (m != selmon) {
+ 		unfocus(selmon->sel, 1);
++		prevmon = selmon;
+ 		selmon = m;
+ 	} else if (!c || c == selmon->sel)
+ 		return;
+@@ -789,8 +792,10 @@ focus(Client *c)
+ 	if (selmon->sel && selmon->sel != c)
+ 		unfocus(selmon->sel, 0);
+ 	if (c) {
+-		if (c->mon != selmon)
++		if (c->mon != selmon) {
++			prevmon = selmon;
+ 			selmon = c->mon;
++		}
+ 		if (c->isurgent)
+ 			seturgent(c, 0);
+ 		detachstack(c);
+@@ -826,6 +831,7 @@ focusmon(const Arg *arg)
+ 	if ((m = dirtomon(arg->i)) == selmon)
+ 		return;
+ 	unfocus(selmon->sel, 0);
++	prevmon = selmon;
+ 	selmon = m;
+ 	focus(NULL);
+ }
+@@ -925,6 +931,21 @@ gettextprop(Window w, Atom atom, char *text, unsigned int size)
+ 	return 1;
+ }
+
++void
++goback(const Arg *arg)
++{
++	if (prevmon == NULL) {
++		Arg a = {0};
++		view(&a);
++	} else if (prevmon != selmon) {
++		unfocus(selmon->sel, 0);
++		Monitor *p = selmon;
++		selmon = prevmon;
++		focus(NULL);
++		prevmon = p;
++	}
++}
++
+ void
+ grabbuttons(Client *c, int focused)
+ {
+@@ -1127,6 +1148,8 @@ motionnotify(XEvent *e)
+ 		return;
+ 	if ((m = recttomon(ev->x_root, ev->y_root, 1, 1)) != mon && mon) {
+ 		unfocus(selmon->sel, 1);
++		if (m != selmon)
++			prevmon = selmon;
+ 		selmon = m;
+ 		focus(NULL);
+ 	}
+@@ -1188,6 +1211,7 @@ movemouse(const Arg *arg)
+ 	XUngrabPointer(dpy, CurrentTime);
+ 	if ((m = recttomon(c->x, c->y, c->w, c->h)) != selmon) {
+ 		sendmon(c, m);
++		prevmon = selmon;
+ 		selmon = m;
+ 		focus(NULL);
+ 	}
+@@ -1340,6 +1364,7 @@ resizemouse(const Arg *arg)
+ 	while (XCheckMaskEvent(dpy, EnterWindowMask, &ev));
+ 	if ((m = recttomon(c->x, c->y, c->w, c->h)) != selmon) {
+ 		sendmon(c, m);
++		prevmon = selmon;
+ 		selmon = m;
+ 		focus(NULL);
+ 	}
+@@ -1743,6 +1768,7 @@ toggleview(const Arg *arg)
+ 	unsigned int newtagset = selmon->tagset[selmon->seltags] ^ (arg->ui & TAGMASK);
+
+ 	if (newtagset) {
++		prevmon = NULL;
+ 		selmon->tagset[selmon->seltags] = newtagset;
+ 		focus(NULL);
+ 		arrange(selmon);
+@@ -2040,6 +2066,7 @@ view(const Arg *arg)
+ {
+ 	if ((arg->ui & TAGMASK) == selmon->tagset[selmon->seltags])
+ 		return;
++	prevmon = NULL;
+ 	selmon->seltags ^= 1; /* toggle sel tagset */
+ 	if (arg->ui & TAGMASK)
+ 		selmon->tagset[selmon->seltags] = arg->ui & TAGMASK;
+--
+2.25.1
